@@ -1606,10 +1606,10 @@ function openManageModal(id, e) {
   document.getElementById('mBudgetGroup').style.display = manageTab==='todo' ? '' : 'none';
   document.getElementById('mPhoneGroup').style.display = manageTab==='contacts' ? '' : 'none';
   document.getElementById('mTagGroup').style.display = manageTab==='ideas' ? '' : 'none';
-  document.getElementById('mResultGroup').style.display = manageTab==='ideas' ? '' : 'none';
-  document.getElementById('mResultGroup').style.display = manageTab==='ideas' ? '' : 'none';
-  const resultEl = document.getElementById('mResult');
-  if (resultEl) resultEl.value = item?.result || '';
+  const rg = document.getElementById('mResultGroup');
+  if (rg) rg.style.display = manageTab==='ideas' ? '' : 'none';
+  const re = document.getElementById('mResult');
+  if (re) re.value = item?.result || '';
   const noteEl = document.getElementById('mNote');
   if (manageTab==='ideas') { noteEl.tagName!=='TEXTAREA' && (noteEl.style.minHeight='80px'); }
 
@@ -1694,6 +1694,10 @@ renderBookings();
     <div class="form-group">
       <label class="form-label">หมายเหตุ / รายละเอียด</label>
       <textarea class="form-textarea" id="mNote" placeholder="รายละเอียดเพิ่มเติม..."></textarea>
+    </div>
+    <div class="form-group" id="mResultGroup" style="display:none">
+      <label class="form-label">ผลลัพธ์</label>
+      <textarea class="form-textarea" id="mResult" placeholder="เช่น มีคนสนใจ, ได้ผลดี..."></textarea>
     </div>
     <button class="btn-submit" onclick="saveManageItem()">บันทึก</button>
     <button class="btn-cancel" onclick="document.getElementById('manageModalOverlay').style.display='none'">ยกเลิก</button>
