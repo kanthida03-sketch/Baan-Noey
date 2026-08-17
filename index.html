@@ -1277,6 +1277,13 @@ function renderSummary() {
   const unpaidClean = filtered.filter(b => !isCleanPaidAll(b.id));
   const unpaidAmt = unpaidClean.reduce((s,b) => s+b.cleanFee, 0);
 
+  const rooms = ['N','O','E','Y'];
+  let totalRoomNights = 0;
+  rooms.forEach(r => {
+    const bs = filtered.filter(b => b.rooms.includes(r));
+    totalRoomNights += bs.reduce((s,b) => s+b.nights, 0);
+  });
+
   const isFiltered = !sumShowAll;
   document.getElementById('stats-grid').innerHTML = `
     ${!isFiltered ? `
@@ -1290,12 +1297,6 @@ function renderSummary() {
     <div class="stat-card" style="grid-column:span 2"><div class="stat-label">ค่าทำความสะอาดค้างจ่ายแม่</div><div class="stat-value" style="color:#8A4000">${unpaidAmt.toLocaleString()}฿</div><div class="stat-sub">${unpaidClean.length} การจองยังไม่ได้โอน</div></div>
   `;
 
-  const rooms = ['N','O','E','Y'];
-  let totalRoomNights = 0;
-  rooms.forEach(r => {
-    const bs = filtered.filter(b => b.rooms.includes(r));
-    totalRoomNights += bs.reduce((s,b) => s+b.nights, 0);
-  });
   let rh = '';
   rooms.forEach(r => {
     const bs = filtered.filter(b => b.rooms.includes(r));
