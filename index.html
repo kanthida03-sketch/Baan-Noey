@@ -113,6 +113,8 @@ body {
 .clean-booking-header { padding: 14px 16px 10px; }
 .clean-booking-name { font-weight: 700; font-size: 16px; color: var(--text); letter-spacing: -0.2px; }
 .clean-booking-sub { font-size: 12px; color: var(--soft); margin-top: 3px; }
+.day-edit-btn { flex-shrink: 0; background: var(--text); color: #fff; border: none; border-radius: 12px; padding: 8px 14px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.day-edit-btn:active { opacity: 0.75; }
 .clean-booking-rooms { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; }
 .clean-section-label { font-size: 10px; font-weight: 700; color: var(--soft); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
 .clean-room-btn {
@@ -642,6 +644,23 @@ function genId() { return Date.now().toString(36) + Math.random().toString(36).s
 function toDateStr(d) { return d.toISOString().split('T')[0]; }
 function todayStr() { return toDateStr(new Date()); }
 
+// ===== MIGRATION: แก้ยอดอะโกด้าเก่าที่เคยคิดเป็น 600/คืน ให้ใช้ยอดจริงที่กรอกไว้ =====
+(function migrateAgodaGross() {
+  let changed = false;
+  bookings.forEach(b => {
+    if (b.channel === 'agoda' && (b.agodaPrice || 0) > 0) {
+      const correctRoomGross = b.agodaPrice;
+      const correctGross = correctRoomGross + (b.extraAmt || 0) + (b.guestAmt || 0);
+      if (b.roomGross !== correctRoomGross || b.gross !== correctGross) {
+        b.roomGross = correctRoomGross;
+        b.gross = correctGross;
+        changed = true;
+      }
+    }
+  });
+  if (changed) save();
+})();
+
 // ===== MODAL =====
 function openModal(id = null) {
   editingId = id;
@@ -687,6 +706,16 @@ function openModal(id = null) {
   } else {
     document.getElementById('modalTitle').textContent = 'บันทึกการจองใหม่';
     setPayment('full');
+    // ถ้าอยู่หน้าปฏิทินและเลือกวันไว้ → เติมวันเข้าพักเป็นวันนั้นให้เลย
+    const calPage = document.getElementById('page-calendar');
+    if (calPage && calPage.style.display !== 'none' && selectedCalDay) {
+      document.getElementById('fCheckin').value = selectedCalDay;
+      const co = new Date(selectedCalDay + 'T00:00:00');
+      co.setDate(co.getDate() + 1);
+      const coStr = `${co.getFullYear()}-${String(co.getMonth()+1).padStart(2,'0')}-${String(co.getDate()).padStart(2,'0')}`;
+      document.getElementById('fCheckout').value = coStr;
+      updatePrice();
+    }
   }
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -823,8 +852,26 @@ function saveBooking() {
   if (!checkin || !checkout) { showToast('กรุณาใส่วันที่'); return; }
   if (checkin >= checkout) { showToast('วันเช็คเอาท์ต้องหลังเช็คอิน'); return; }
 
+  // กันจองห้องซ้ำ — เช็คว่าห้องที่เลือกมีคนจองช่วงวันทับกันอยู่แล้วไหม
+  const conflicts = [];
+  bookings.forEach(b => {
+    if (editingId && b.id === editingId) return; // ข้ามตัวเองตอนแก้ไข
+    const overlap = checkin < b.checkout && checkout > b.checkin; // ช่วงวันทับกัน
+    if (!overlap) return;
+    selectedRooms.forEach(r => {
+      if (b.rooms.includes(r)) conflicts.push(r);
+    });
+  });
+  if (conflicts.length > 0) {
+    const uniq = [...new Set(conflicts)];
+    showToast(`ห้อง ${uniq.join(', ')} มีคนจองช่วงวันนี้แล้ว`);
+    return;
+  }
+
   const nights = Math.round((new Date(checkout) - new Date(checkin)) / 86400000);
-  const gross = nights * selectedRooms.length * ROOM_PRICE;
+  const isAgoda = selectedChannel === 'agoda';
+  const agodaPrice = isAgoda ? (parseFloat(document.getElementById('fAgodaPrice').value)||0) : 0;
+  const gross = isAgoda ? agodaPrice : (nights * selectedRooms.length * ROOM_PRICE);
   const extraAmt = selectedExtras.length * EXTRA_PRICE;
   const surchargePerNight = calcGuestSurcharge(selectedRooms.length);
   const guestAmt = surchargePerNight * nights;
@@ -843,7 +890,7 @@ function saveBooking() {
     roomGross: gross,
     extraAmt,
     extras: [...selectedExtras],
-    agodaPrice: selectedChannel === 'agoda' ? (parseFloat(document.getElementById('fAgodaPrice').value)||0) : 0,
+    agodaPrice: agodaPrice,
     discount: parseFloat(document.getElementById('fDiscount').value) || 0,
     cleanFee: cleanFeeTotal,
     payment: paymentStatus,
@@ -993,10 +1040,13 @@ function renderDayDetail(ds) {
     const ch = (b.channel && CHANNELS[b.channel]) ? '(' + CHANNELS[b.channel] + ')' : '';
     const rooms = b.rooms.map(r => `<span class="room-badge room-${r}">${r}</span>`).join(' ');
     html += `<div class="clean-booking-card">
-      <div class="clean-booking-header">
-        <div class="clean-booking-name">${b.name}</div>
-        <div class="clean-booking-sub">${b.phone||'—'}${ch?' · '+ch:''}</div>
-        <div class="clean-booking-sub">${rooms} &nbsp;·&nbsp; ${b.nights} คืน &nbsp;·&nbsp; ${b.gross.toLocaleString()}฿</div>
+      <div class="clean-booking-header" style="display:flex;align-items:flex-start;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div class="clean-booking-name">${b.name}</div>
+          <div class="clean-booking-sub">${b.phone||'—'}${ch?' · '+ch:''}</div>
+          <div class="clean-booking-sub">${rooms} &nbsp;·&nbsp; ${b.nights} คืน &nbsp;·&nbsp; ${b.gross.toLocaleString()}฿</div>
+        </div>
+        <button class="day-edit-btn" onclick="openModal('${b.id}')">✏️ แก้ไข</button>
       </div>
       <div class="clean-booking-rooms">
         <div class="clean-section-label"> จ่ายค่าทำความสะอาดให้แม่ (${CLEAN_FEE}฿/ห้อง) หรือยัง?</div>`;
@@ -1054,7 +1104,7 @@ function renderBookings() {
     if (currentFilter === 'unpaid_clean') return !isCleanPaidAll(b.id);
     return true;
   });
-  filtered.sort((a, b) => a.checkin.localeCompare(b.checkin));
+  filtered.sort((a, b) => b.checkin.localeCompare(a.checkin));
 
   const el = document.getElementById('bookings-list');
   if (filtered.length === 0) {
@@ -1234,12 +1284,18 @@ function renderSummary() {
     <div class="stat-card"><div class="stat-label">อยู่ในบ้านตอนนี้</div><div class="stat-value">${checkedin}</div><div class="stat-sub">กลุ่ม</div></div>
     ` : ''}
     <div class="stat-card"><div class="stat-label">รายได้รวม</div><div class="stat-value">${totalGross.toLocaleString()}</div><div class="stat-sub">${filtered.length} การจอง · ${totalNights} คืน</div></div>
+    <div class="stat-card"><div class="stat-label">ห้องที่มีคนพัก</div><div class="stat-value">${totalRoomNights}</div><div class="stat-sub">ห้อง-คืน (รวมทุกห้อง)</div></div>
     <div class="stat-card"><div class="stat-label">รายได้สุทธิ</div><div class="stat-value" style="color:var(--forest)">${totalNet.toLocaleString()}</div><div class="stat-sub">หลังหักค่าทำความสะอาด</div></div>
     ${totalDiscount > 0 ? `<div class="stat-card"><div class="stat-label">ส่วนลดรวม</div><div class="stat-value" style="color:#8A4000">${totalDiscount.toLocaleString()}</div><div class="stat-sub">บาท</div></div>` : ''}
     <div class="stat-card" style="grid-column:span 2"><div class="stat-label">ค่าทำความสะอาดค้างจ่ายแม่</div><div class="stat-value" style="color:#8A4000">${unpaidAmt.toLocaleString()}฿</div><div class="stat-sub">${unpaidClean.length} การจองยังไม่ได้โอน</div></div>
   `;
 
   const rooms = ['N','O','E','Y'];
+  let totalRoomNights = 0;
+  rooms.forEach(r => {
+    const bs = filtered.filter(b => b.rooms.includes(r));
+    totalRoomNights += bs.reduce((s,b) => s+b.nights, 0);
+  });
   let rh = '';
   rooms.forEach(r => {
     const bs = filtered.filter(b => b.rooms.includes(r));
@@ -1532,8 +1588,8 @@ function saveExpense() {
 manageData.expenses = manageData.expenses.filter(e=>!String(e.cat).startsWith('cat_'));
 saveManage();
 
-  // ถ้ามี record เดือนนี้อยู่แล้ว ให้ replace อัตโนมัติ
-  if (!existId) {
+  // ถ้ามี record เดือนนี้อยู่แล้ว ให้ replace อัตโนมัติ (เฉพาะหมวดตายตัว — "อื่นๆ" มีได้หลายรายการ)
+  if (!existId && !isOther) {
     manageData.expenses = manageData.expenses.filter(e=>!(e.cat===catKey && e.yearMonth===yearMonth));
   }
 
