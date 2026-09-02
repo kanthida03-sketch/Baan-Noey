@@ -216,6 +216,14 @@ body {
 .month-card-sub { font-size: 10px; color: var(--soft); margin-top: 2px; }
 
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.export-btn { width: 100%; background: var(--forest, #2d8a56); color: #fff; border: none; border-radius: 16px; padding: 15px; font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; margin-bottom: 16px; }
+.export-btn:active { opacity: 0.8; }
+.backup-box { margin-top: 20px; background: #fff8e6; border: 1.5px solid #f0d98a; border-radius: 16px; padding: 16px; }
+.backup-title { font-size: 15px; font-weight: 700; color: #8A4000; margin-bottom: 6px; }
+.backup-desc { font-size: 12.5px; color: var(--text-soft, #8a7a5a); line-height: 1.5; margin-bottom: 12px; }
+.backup-btn { width: 100%; background: var(--text, #3a2a10); color: #fff; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; margin-bottom: 8px; }
+.backup-btn.restore { background: #fff; color: var(--text, #3a2a10); border: 1.5px solid #d8c89a; margin-bottom: 0; }
+.backup-btn:active { opacity: 0.8; }
 .stat-card { background: rgba(255,255,255,0.85); border-radius: 18px; padding: 16px; }
 .stat-label { font-size: 10px; color: var(--soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
 .stat-value { font-size: 26px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
@@ -458,8 +466,16 @@ body {
       <div class="month-grid" id="monthGrid"></div>
     </div>
     <div class="stats-grid" id="stats-grid"></div>
+    <button class="export-btn" onclick="exportPeriodCSV()">⬇️ เซฟข้อมูลลูกค้าเดือนนี้ (Excel)</button>
     <div class="section-title" style="margin-top:4px">รายได้ตามห้อง</div>
     <div id="room-stats"></div>
+    <div class="backup-box">
+      <div class="backup-title">🛡️ สำรองข้อมูลกันหาย (สำคัญ!)</div>
+      <div class="backup-desc">ข้อมูลเก็บในเครื่องนี้เท่านั้น ถ้าเปลี่ยนมือถือหรือล้างแอปข้อมูลจะหาย — กดสำรองเก็บไฟล์ไว้ พอเปลี่ยนเครื่องค่อยกดกู้คืน</div>
+      <button class="backup-btn" onclick="backupAll()">💾 สำรองข้อมูลทั้งหมด</button>
+      <button class="backup-btn restore" onclick="document.getElementById('restoreFile').click()">📥 กู้คืนข้อมูล</button>
+      <input type="file" id="restoreFile" accept=".json" style="display:none" onchange="restoreAll(event)">
+    </div>
   </div>
 </div>
 
@@ -1225,6 +1241,109 @@ function filterBookingsForPeriod(bks) {
     if (sumSelectedMonth !== null) return ci.getFullYear() === sumYear && ci.getMonth() === sumSelectedMonth;
     return ci.getFullYear() === sumYear && ci.getMonth() === sumMonth;
   });
+}
+
+// ===== EXPORT / BACKUP =====
+const THAI_SHORT_MONTHS_EXP = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+function csvCell(v) {
+  const s = (v == null ? '' : String(v));
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportPeriodCSV() {
+  const rows = filterBookingsForPeriod(bookings)
+    .slice()
+    .sort((a, b) => a.checkin.localeCompare(b.checkin));
+
+  if (rows.length === 0) { showToast('เดือนนี้ยังไม่มีการจอง'); return; }
+
+  const header = ['ชื่อลูกค้า','เบอร์โทร','ช่องทาง','ห้องพัก','วันเช็คอิน','วันเช็คเอาท์','จำนวนคืน','ยอดรวม (บาท)','สถานะชำระ','โอนค่าทำความสะอาดแล้ว','หมายเหตุ'];
+  const lines = [header.map(csvCell).join(',')];
+
+  rows.forEach(b => {
+    lines.push([
+      b.name,
+      b.phone || '',
+      (CHANNELS[b.channel] || b.channel || ''),
+      b.rooms.join('+'),
+      b.checkin,
+      b.checkout,
+      b.nights,
+      b.gross,
+      b.payment === 'full' ? 'ชำระครบ' : 'จ่ายมัดจำ',
+      isCleanPaidAll(b.id) ? 'โอนแล้ว' : 'ยังไม่โอน',
+      b.note || ''
+    ].map(csvCell).join(','));
+  });
+
+  // ป้าย period สำหรับชื่อไฟล์
+  let period = 'ทั้งหมด';
+  if (!sumShowAll) {
+    if (sumMode === 'month') period = `${THAI_SHORT_MONTHS_EXP[sumMonth]}-${sumYear+543}`;
+    else if (sumSelectedMonth !== null) period = `${THAI_SHORT_MONTHS_EXP[sumSelectedMonth]}-${sumYear+543}`;
+    else period = `ปี-${sumYear+543}`;
+  }
+
+  const csv = '\uFEFF' + lines.join('\r\n'); // BOM กันภาษาไทยเพี้ยนใน Excel
+  downloadFile(csv, `บ้านเนย_${period}.csv`, 'text/csv;charset=utf-8;');
+  showToast(`เซฟ ${rows.length} รายการแล้ว`);
+}
+
+function backupAll() {
+  const data = {
+    _app: 'baan-noey',
+    _version: 1,
+    _exportedAt: new Date().toISOString(),
+    bookings: bookings,
+    cleanPaidMap: cleanPaidMap,
+    manageData: manageData
+  };
+  const today = new Date();
+  const stamp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  downloadFile(JSON.stringify(data), `บ้านเนย_สำรองข้อมูล_${stamp}.json`, 'application/json');
+  showToast('สำรองข้อมูลเรียบร้อย เก็บไฟล์ไว้ให้ดีนะ');
+}
+
+function restoreAll(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data._app !== 'baan-noey' || !Array.isArray(data.bookings)) {
+        showToast('ไฟล์ไม่ถูกต้อง'); return;
+      }
+      const cnt = data.bookings.length;
+      if (!confirm(`กู้คืนข้อมูล ${cnt} การจอง?\nข้อมูลปัจจุบันในเครื่องจะถูกแทนที่ทั้งหมด`)) {
+        event.target.value = ''; return;
+      }
+      bookings = data.bookings;
+      if (data.cleanPaidMap) cleanPaidMap = data.cleanPaidMap;
+      if (data.manageData) manageData = data.manageData;
+      save(); saveClean();
+      localStorage.setItem('baannoey_manage', JSON.stringify(manageData));
+      showToast(`กู้คืน ${cnt} การจองสำเร็จ`);
+      renderSummary();
+    } catch (err) {
+      showToast('อ่านไฟล์ไม่ได้ ไฟล์อาจเสียหาย');
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function renderSummary() {
